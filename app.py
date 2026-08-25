@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-Fotos de pedido — Kbas Office
-Sube el Excel del pedido (del ERP, refs con color) + las fotos de la temporada.
-Devuelve un ZIP con todas las fotos de esas referencias: la principal
-y todas sus variantes (_D, _LT, _H...), listas para enviar al cliente.
+Recopilar fotos — Kbas Office
+Sube cualquier documento con columna de referencia (pedido en PDF/Excel,
+listado de temporada, selección de proveedor...) + las fotos, y elige si
+quieres solo la foto principal de cada ref o también sus variantes
+(_D, _LT, _H...). Devuelve un ZIP listo para descargar.
 """
 
 import io
@@ -92,8 +93,10 @@ def extraer_refs(archivo_bytes, nombre_archivo):
     return refs, col_ref
 
 
-def recopilar_fotos(archivo_bytes, nombre_archivo, carpeta):
-    """Devuelve (zip_bytes, n_refs, n_fotos, sin_foto, origen)."""
+def recopilar_fotos(archivo_bytes, nombre_archivo, carpeta, solo_principal=False):
+    """Devuelve (zip_bytes, n_refs, n_fotos, sin_foto, origen).
+    Si solo_principal=True, solo se incluye la foto exacta de cada ref
+    (sin variantes _D, _LT, _H...)."""
     refs, origen = extraer_refs(archivo_bytes, nombre_archivo)
 
     # Índice de TODAS las fotos (aquí las variantes también cuentan)
@@ -108,10 +111,13 @@ def recopilar_fotos(archivo_bytes, nombre_archivo, carpeta):
     n_fotos, sin_foto, ya_metidas = 0, [], set()
     with zipfile.ZipFile(salida, "w", zipfile.ZIP_DEFLATED) as z:
         for ref in refs:
-            encontradas = [
-                (nombre, ruta) for nombre, ruta in fotos.items()
-                if nombre == ref or nombre.startswith(ref + "_")
-            ]
+            if solo_principal:
+                encontradas = [(ref, fotos[ref])] if ref in fotos else []
+            else:
+                encontradas = [
+                    (nombre, ruta) for nombre, ruta in fotos.items()
+                    if nombre == ref or nombre.startswith(ref + "_")
+                ]
             if not encontradas:
                 sin_foto.append(ref)
                 continue
@@ -128,13 +134,13 @@ def recopilar_fotos(archivo_bytes, nombre_archivo, carpeta):
 
 
 # ---------- Interfaz ----------
-st.set_page_config(page_title="Fotos de pedido · Kbas Office", page_icon="📦")
+st.set_page_config(page_title="Recopilar fotos · Kbas Office", page_icon="📦")
 
-st.title("Fotos de pedido")
-st.caption("Sube el pedido (PDF del ERP o Excel) y las fotos de la temporada. Te devuelve un ZIP con todas las fotos de esas referencias (principal + detalles), listo para enviar al cliente.")
+st.title("Recopilar fotos")
+st.caption("Sube cualquier documento con referencias (pedido en PDF/Excel, listado de temporada, selección de proveedor...) y las fotos. Te devuelve un ZIP con las fotos de esas referencias, listo para descargar.")
 
 excel_subido = st.file_uploader(
-    "1 · Pedido del ERP: el PDF directamente, o un Excel con columna de referencia",
+    "1 · Documento con las referencias: PDF del ERP, o un Excel con columna de referencia",
     type=["pdf", "xlsx", "xlsm"],
 )
 
@@ -144,20 +150,27 @@ fotos_subidas = st.file_uploader(
     accept_multiple_files=True,
 )
 
+modo = st.radio(
+    "3 · ¿Qué fotos quieres de cada referencia?",
+    ["Todas (principal + detalles _D, _LT...)", "Solo la foto principal"],
+    help="'Todas' es lo habitual para un pedido de ecommerce de un cliente. 'Solo la principal' vale para listados de temporada o catálogos, donde no hacen falta los detalles.",
+)
+solo_principal = modo.startswith("Solo")
+
 if excel_subido and fotos_subidas:
-    if st.button("Preparar fotos del pedido", type="primary"):
+    if st.button("Preparar fotos", type="primary"):
         with tempfile.TemporaryDirectory() as tmp:
             volcar_fotos(fotos_subidas, tmp)
             with st.spinner("Buscando y empaquetando fotos…"):
                 try:
                     salida, n_refs, n_fotos, sin_foto, origen = recopilar_fotos(
-                        excel_subido.getvalue(), excel_subido.name, tmp
+                        excel_subido.getvalue(), excel_subido.name, tmp, solo_principal
                     )
                 except ValueError as e:
                     st.error(str(e))
                     st.stop()
 
-        st.success(f"Listo: {n_fotos} fotos de {n_refs} referencias del pedido ({origen}).")
+        st.success(f"Listo: {n_fotos} fotos de {n_refs} referencias ({origen}).")
         if sin_foto:
             with st.expander(f"⚠ {len(sin_foto)} referencias sin ninguna foto"):
                 st.text("\n".join(sin_foto))
